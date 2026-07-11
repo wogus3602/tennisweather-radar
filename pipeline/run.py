@@ -40,6 +40,7 @@ def main() -> int:
     if not key:
         print("KMA_APIHUB_KEY 필요", file=sys.stderr)
         return 2
+    os.environ.setdefault("GDAL_PAM_ENABLED", "NO")
     site_base = os.environ.get(
         "SITE_BASE", "https://wogus3602.github.io/tennisweather-radar")
 
@@ -90,22 +91,47 @@ def main() -> int:
 
     # ── 예측(QPF +10~+120) ───────────────────────────────────────
     nowcast_entries = []
-    base_tms = kma_api.latest_tms(
-        lambda tm: kma_api.fetch_qpf_once(tm, 10, key) is not None,
-        step_min=10, count=1, max_back=6)
+    qpf_first = {}
+
+    def qpf_probe(tm):
+        got = kma_api.fetch_qpf_once(tm, 10, key)
+        if got is not None:
+            qpf_first[tm] = got
+        return got is not None
+
+    base_tms = kma_api.latest_tms(qpf_probe, step_min=10, count=1, max_back=6)
     if base_tms:
         base = base_tms[0]
         base_dt = datetime.strptime(base + "+0900", "%Y%m%d%H%M%z")
         for ef in NOWCAST_EFS:
             best = None  # (opaque, cov, png)
-            for _ in range(QPF_RETRIES):
+            remaining = QPF_RETRIES
+            preload = qpf_first.get(base) if ef == 10 else None
+            if preload is not None:
+                remaining -= 1
+                cov, png = preload
+                tmp = WORK / "probe.png"
+                tmp.write_bytes(png)
+                try:
+                    op = render.opaque_count(tmp)
+                except Exception as e:
+                    print(f"skip nowcast ef={ef} attempt: 응답 검사 실패 {e}")
+                else:
+                    best = (op, cov, png)
+            for _ in range(remaining):
+                if best is not None and best[0] > 0:
+                    break
                 got = kma_api.fetch_qpf_once(base, ef, key)
                 if got is None:
                     continue
                 cov, png = got
                 tmp = WORK / "probe.png"
                 tmp.write_bytes(png)
-                op = render.opaque_count(tmp)
+                try:
+                    op = render.opaque_count(tmp)
+                except Exception as e:
+                    print(f"skip nowcast ef={ef} attempt: 응답 검사 실패 {e}")
+                    continue
                 if best is None or op > best[0]:
                     best = (op, cov, png)
                 if op > 0:
@@ -128,6 +154,9 @@ def main() -> int:
     if not past_entries:
         print("과거 프레임 0개 — 배포 중단", file=sys.stderr)
         return 1
+
+    for p in SITE.rglob("*.aux.xml"):  # gdal PAM 사이드카 잔재 안전망
+        p.unlink()
 
     generated = datetime.now(kma_api.KST).isoformat(timespec="seconds")
     doc = frames.build_frames_json(past_entries, nowcast_entries, generated)
