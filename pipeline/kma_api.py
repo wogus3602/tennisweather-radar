@@ -1,6 +1,7 @@
 """기상청 API허브 클라이언트 — 실황(HSP) 바이너리·초단기 예측(4.4) 이미지."""
 import gzip
 import json
+import sys
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -64,20 +65,30 @@ def fetch_qpf_once(tm: str, ef: int, key: str):
 
     coverage = {"sx","sy","ex","ey"} (LCC lat_0=0, start=좌상단).
     간헐 빈 이미지는 여기서 판단하지 않는다(호출부에서 재시도·채택).
+    미발표·네트워크 실패는 조용히 None. 응답 스키마 불일치는 파라미터/명세
+    버그 신호라 stderr에 남기고 None — 운영에서 '데이터 없음'과 구분한다.
     """
     p = dict(_QPF_FIXED, tm=tm, tm_st=tm, tm_ed=tm, tm2=tm, ef=str(ef),
              authKey=key)
     url = f"{HOST}/api/typ03/cgi/rdr/nph-qpf_ana_imgp?" + urllib.parse.urlencode(p)
     try:
-        d = json.loads(_get(url))
+        body = _get(url)
+    except Exception:
+        return None
+    try:
+        d = json.loads(body)
         r = d["data"]["result"]
         if d.get("meta", {}).get("errCd") != "000" or not r.get("url"):
             return None
-        png = _get(HOST + r["url"])
         cov = {"sx": float(r["imageCoverageStartProjX"]),
                "sy": float(r["imageCoverageStartProjY"]),
                "ex": float(r["imageCoverageEndProjX"]),
                "ey": float(r["imageCoverageEndProjY"])}
-        return cov, png
+    except Exception as e:
+        print(f"qpf 응답 스키마 예상 밖(tm={tm} ef={ef}): {e!r}", file=sys.stderr)
+        return None
+    try:
+        png = _get(HOST + r["url"])
     except Exception:
         return None
+    return cov, png
