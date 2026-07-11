@@ -1,0 +1,35 @@
+name: radar
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: radar
+  cancel-in-progress: false
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: install gdal
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends gdal-bin python3-gdal python3-numpy
+      - name: run tests
+        run: python3 -m unittest discover -s tests
+      - name: build site
+        env:
+          KMA_APIHUB_KEY: ${{ secrets.KMA_APIHUB_KEY }}
+        run: python3 -m pipeline.run
+      - name: deploy gh-pages (orphan force-push)
+        run: |
+          cd site
+          git init -q -b gh-pages
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "radar $(date -u +%FT%TZ)"
+          git push -f -q "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
