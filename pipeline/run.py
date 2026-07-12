@@ -185,10 +185,10 @@ def main() -> int:
             continue
         try:
             doc = wind.build_wind_json(got[0], got[1], WORK)
+            dest.write_text(json.dumps(doc, separators=(",", ":")))
         except Exception as e:
-            print(f"skip wind {vt}: {e}")
+            print(f"skip wind {vt}: 쓰기 실패 {e}")
             continue
-        dest.write_text(json.dumps(doc, separators=(",", ":")))
         wind_entries.append((vt, rel))
 
     if not past_entries:
