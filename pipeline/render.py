@@ -16,11 +16,16 @@ def render_hsp_png(arr, out_png, workdir, colormap_path, out_width=1024):
     merc = workdir / "hsp_3857.tif"
     color = workdir / "hsp_color.tif"
     grid.write_lcc_tiff(arr, lcc)
-    grid.warp_to_3857(lcc, merc, nodata=grid.NULL_V)
+    # 관측 강수는 RainViewer식 스무딩(bilinear 워프 + 선형 컬러램프)을 적용해
+    # 격자 경계가 아닌 부드러운 그라디언트로 렌더한다. 예측(qpf)은 팔레트
+    # 순수성 유지를 위해 near를 그대로 사용(qpf_to_overlay_png 참조).
+    grid.warp_to_3857(lcc, merc, nodata=grid.NULL_V, resample="bilinear")
     subprocess.run(["gdaldem", "color-relief", str(merc), str(colormap_path),
-                    str(color), "-alpha", "-nearest_color_entry", "-q"],
+                    str(color), "-alpha", "-q"],
                    check=True)
-    subprocess.run(["gdal_translate", "-q", "-of", "PNG",
+    # 최종 리사이즈도 bilinear로: 기본(nearest)은 1~2px 폭의 경계 그라디언트를
+    # 대부분 솎아내 스무딩 효과가 배포 해상도(out_width)에서 사라진다.
+    subprocess.run(["gdal_translate", "-q", "-of", "PNG", "-r", "bilinear",
                     "-outsize", str(out_width), "0", str(color), str(out_png)],
                    check=True)
     return grid.bounds_4326(merc)

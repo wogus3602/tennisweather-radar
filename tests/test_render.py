@@ -44,6 +44,18 @@ class RenderTest(unittest.TestCase):
             self.assertEqual(ds.RasterCount, 4)
             self.assertEqual(ds.RasterXSize, 1024)
 
+    def test_hsp_png_is_smoothed(self):
+        """bilinear 워프 + 선형 컬러램프 → 경계에 그라디언트가 생겨 색상 수가
+        많아야 한다(nearest+near였다면 소수 색상만 나옴)."""
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "smooth.png"
+            render.render_hsp_png(synthetic_hsp(), out, Path(td), COLORMAP)
+            ds = gdal.Open(str(out))
+            a = ds.ReadAsArray()  # (4, H, W)
+            rgba = np.moveaxis(a, 0, -1)
+            unique = np.unique(rgba.reshape(-1, 4), axis=0)
+            self.assertGreater(len(unique), 20)
+
     def test_qpf_background_removed(self):
         with tempfile.TemporaryDirectory() as td:
             png = make_qpf_png(td)

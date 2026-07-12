@@ -45,8 +45,8 @@ def write_lcc_tiff(arr: np.ndarray, path) -> None:
     ds.FlushCache()
 
 
-def warp_to_3857(src, dst, nodata=None) -> None:
-    cmd = ["gdalwarp", "-overwrite", "-q", "-t_srs", "EPSG:3857", "-r", "near"]
+def warp_to_3857(src, dst, nodata=None, resample="near") -> None:
+    cmd = ["gdalwarp", "-overwrite", "-q", "-t_srs", "EPSG:3857", "-r", resample]
     if nodata is not None:
         cmd += ["-srcnodata", str(nodata), "-dstnodata", str(nodata)]
     cmd += [str(src), str(dst)]
