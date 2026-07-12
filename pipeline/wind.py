@@ -35,6 +35,11 @@ def parse_dfs_text(body: str) -> np.ndarray:
     return arr
 
 
+def coverage(arr: np.ndarray) -> float:
+    """유효(비 NaN) 셀 비율 — 전부-결측 응답(미발표 tmfc) 판별용."""
+    return float(1.0 - np.isnan(arr).mean())
+
+
 def fetch_uv(tmfc: str, tmef: str, key: str):
     """UUU·VVV 두 배열(top-down) 또는 None(미발표/오류)."""
     out = []

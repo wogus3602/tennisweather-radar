@@ -176,12 +176,19 @@ def main() -> int:
             continue
         if not refresh and rel not in old_wind:
             continue  # 비갱신 런은 신규 수집 안 함
-        tmfc_dt = datetime.strptime(vt + "+0900", "%Y%m%d%H%M%z") \
-            - timedelta(hours=1)
-        tmfc = tmfc_dt.strftime("%Y%m%d%H") + "30"
-        got = wind.fetch_uv(tmfc, vt, key)
+        base_dt = datetime.strptime(vt + "+0900", "%Y%m%d%H%M%z")
+        got = None
+        for back in range(1, 4):  # (VT-1h)30부터 과거로 최대 3개 후보
+            tmfc_dt = base_dt - timedelta(hours=back)
+            if tmfc_dt > datetime.now(kma_api.KST):
+                continue  # 미발표(미래) 발표시각 제외
+            tmfc = tmfc_dt.strftime("%Y%m%d%H") + "30"
+            cand = wind.fetch_uv(tmfc, vt, key)
+            if cand is not None and wind.coverage(cand[0]) > 0.01:
+                got = cand
+                break
         if got is None:
-            print(f"skip wind {vt}: 수집 실패")
+            print(f"skip wind {vt}: 수집 실패(발표 지연/무자료)")
             continue
         try:
             doc = wind.build_wind_json(got[0], got[1], WORK)

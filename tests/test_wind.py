@@ -53,6 +53,13 @@ class WindTest(unittest.TestCase):
         self.assertTrue(np.isnan(out[0, 0]))    # 깊은 내부는 유지
         self.assertAlmostEqual(float(out[19, 19]), 2.0, places=3)  # 유효값 불변
 
+    def test_coverage(self):
+        arr = np.full((4, 4), 1.0, dtype=np.float32)
+        self.assertAlmostEqual(wind.coverage(arr), 1.0)
+        arr[:2, :] = np.nan
+        self.assertAlmostEqual(wind.coverage(arr), 0.5)
+        self.assertAlmostEqual(wind.coverage(np.full((2, 2), np.nan)), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
