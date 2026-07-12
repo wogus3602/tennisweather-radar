@@ -38,6 +38,16 @@ class FramesTest(unittest.TestCase):
         self.assertEqual(frames.reusable_paths(None, ["x"]), set())
         self.assertEqual(frames.reusable_paths({"bogus": 1}, ["x"]), set())
 
+    def test_wind_refresh_needed(self):
+        target = "2026-07-12T21:00:00+09:00"
+        self.assertTrue(frames.wind_refresh_needed(None, target))
+        self.assertTrue(frames.wind_refresh_needed({"bogus": 1}, target))
+        self.assertTrue(frames.wind_refresh_needed(
+            {"wind": [{"time": "2026-07-12T20:00:00+09:00"}]}, target))
+        self.assertFalse(frames.wind_refresh_needed(
+            {"wind": [{"time": "2026-07-12T21:00:00+09:00"}]}, target))
+        self.assertTrue(frames.wind_refresh_needed({"wind": []}, target))
+
 
 if __name__ == "__main__":
     unittest.main()

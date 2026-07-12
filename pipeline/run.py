@@ -160,7 +160,7 @@ def main() -> int:
          + timedelta(hours=h)).strftime("%Y%m%d%H%M")
         for h in range(-2, 7)
     ]
-    refresh = now.minute < 10  # 시간당 첫 크론에서만 신규 수집
+    refresh = frames.wind_refresh_needed(old, frames.tm_to_iso(wind_hours[-1]))
     refresh = refresh or os.environ.get("WIND_FORCE_REFRESH") == "1"
     old_wind = {w.get("path") for w in (old or {}).get("wind", [])
                 if isinstance(w, dict)}
