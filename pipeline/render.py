@@ -10,7 +10,7 @@ gdal.UseExceptions()
 _QPF_BG = 250  # 예측 이미지의 불투명 배경 회색값(R=G=B=250)
 
 
-def render_hsp_png(arr, out_png, workdir, colormap_path, out_width=1024):
+def render_hsp_png(arr, out_png, workdir, colormap_path, out_width=2048):
     """top-down HSP 배열 → 재투영·컬러맵·투명 PNG. bounds(4326) 반환."""
     lcc = workdir / "hsp_lcc.tif"
     merc = workdir / "hsp_3857.tif"
@@ -31,7 +31,7 @@ def render_hsp_png(arr, out_png, workdir, colormap_path, out_width=1024):
     return grid.bounds_4326(merc)
 
 
-def qpf_to_overlay_png(png_bytes, cov, out_png, workdir, out_width=1024):
+def qpf_to_overlay_png(png_bytes, cov, out_png, workdir, out_width=2048):
     """예측 PNG(LCC lat_0=0) → 배경 투명화 + 3857 재투영 PNG. bounds 반환."""
     raw = workdir / "qpf_raw.png"
     raw.write_bytes(png_bytes)

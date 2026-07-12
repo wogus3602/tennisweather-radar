@@ -42,7 +42,7 @@ class RenderTest(unittest.TestCase):
             self.assertAlmostEqual(b["west"], 118.848103, places=2)
             ds = gdal.Open(str(out))
             self.assertEqual(ds.RasterCount, 4)
-            self.assertEqual(ds.RasterXSize, 1024)
+            self.assertEqual(ds.RasterXSize, 2048)
 
     def test_hsp_png_is_smoothed(self):
         """bilinear 워프 + 선형 컬러램프 → 경계에 그라디언트가 생겨 색상 수가
