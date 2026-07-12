@@ -21,6 +21,14 @@ class FramesTest(unittest.TestCase):
         self.assertEqual(out["frames"][-1]["kind"], "nowcast")
         self.assertEqual(out["generated"], "2026-07-11T23:40:00+09:00")
 
+    def test_wind_entries_sorted_and_optional(self):
+        out = frames.build_frames_json([], [], "g",
+                                       wind_entries=[("202607121500", "wind/202607121500.json"),
+                                                     ("202607121400", "wind/202607121400.json")])
+        self.assertEqual([w["time"] for w in out["wind"]],
+                         ["2026-07-12T14:00:00+09:00", "2026-07-12T15:00:00+09:00"])
+        self.assertEqual(frames.build_frames_json([], [], "g")["wind"], [])
+
     def test_reusable_paths(self):
         old = {"frames": [{"path": "frames/past/a.png"},
                           {"path": "frames/past/b.png"}]}

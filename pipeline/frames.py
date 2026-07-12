@@ -6,15 +6,21 @@ def tm_to_iso(tm: str) -> str:
             f"T{tm[8:10]}:{tm[10:12]}:00+09:00")
 
 
-def build_frames_json(past, nowcast, generated_iso):
-    """past/nowcast: (tm, path, bounds) 목록 → 스키마 dict(time 오름차순)."""
+def build_frames_json(past, nowcast, generated_iso, wind_entries=()):
+    """past/nowcast: (tm, path, bounds) 목록 → 스키마 dict(time 오름차순).
+
+    wind_entries: (tm, path) 목록 → doc["wind"] = [{"time","path"}](오름차순).
+    """
     out = []
     for kind, items in (("past", past), ("nowcast", nowcast)):
         for tm, path, bounds in items:
             out.append({"time": tm_to_iso(tm), "path": path,
                         "kind": kind, "bounds": bounds})
     out.sort(key=lambda f: f["time"])
-    return {"generated": generated_iso, "frames": out}
+    wind = sorted(
+        [{"time": tm_to_iso(tm), "path": p} for tm, p in wind_entries],
+        key=lambda w: w["time"])
+    return {"generated": generated_iso, "frames": out, "wind": wind}
 
 
 def reusable_paths(old_frames_json, wanted_paths):

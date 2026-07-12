@@ -7,7 +7,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import frames, grid, kma_api, render
+from . import frames, grid, kma_api, render, wind
 
 ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site"
@@ -151,6 +151,46 @@ def main() -> int:
     else:
         print("QPF 발표분 없음 — 예측 프레임 생략")
 
+    # ── 바람(U·V, 시간당 1회 + Pages 재사용) ─────────────────────
+    (SITE / "wind").mkdir(exist_ok=True)
+    wind_entries = []
+    now = datetime.now(kma_api.KST)
+    wind_hours = [
+        (now.replace(minute=0, second=0, microsecond=0)
+         + timedelta(hours=h)).strftime("%Y%m%d%H%M")
+        for h in range(-2, 7)
+    ]
+    refresh = now.minute < 10  # 시간당 첫 크론에서만 신규 수집
+    refresh = refresh or os.environ.get("WIND_FORCE_REFRESH") == "1"
+    old_wind = {w.get("path") for w in (old or {}).get("wind", [])
+                if isinstance(w, dict)}
+    for vt in wind_hours:
+        rel = f"wind/{vt}.json"
+        dest = SITE / rel
+        is_future = vt > now.strftime("%Y%m%d%H%M")
+        # 과거·현재 시각은 재사용 우선(예보 갱신 의미 없음), 미래는
+        # refresh 런에서 재수집, 아닌 런은 재사용.
+        if rel in old_wind and (not refresh or not is_future) \
+                and _download(f"{site_base}/{rel}", dest):
+            wind_entries.append((vt, rel))
+            continue
+        if not refresh and rel not in old_wind:
+            continue  # 비갱신 런은 신규 수집 안 함
+        tmfc_dt = datetime.strptime(vt + "+0900", "%Y%m%d%H%M%z") \
+            - timedelta(hours=1)
+        tmfc = tmfc_dt.strftime("%Y%m%d%H") + "30"
+        got = wind.fetch_uv(tmfc, vt, key)
+        if got is None:
+            print(f"skip wind {vt}: 수집 실패")
+            continue
+        try:
+            doc = wind.build_wind_json(got[0], got[1], WORK)
+        except Exception as e:
+            print(f"skip wind {vt}: {e}")
+            continue
+        dest.write_text(json.dumps(doc, separators=(",", ":")))
+        wind_entries.append((vt, rel))
+
     if not past_entries:
         print("과거 프레임 0개 — 배포 중단", file=sys.stderr)
         return 1
@@ -159,10 +199,12 @@ def main() -> int:
         p.unlink()
 
     generated = datetime.now(kma_api.KST).isoformat(timespec="seconds")
-    doc = frames.build_frames_json(past_entries, nowcast_entries, generated)
+    doc = frames.build_frames_json(past_entries, nowcast_entries, generated,
+                                   wind_entries=wind_entries)
     (SITE / "frames.json").write_text(
         json.dumps(doc, ensure_ascii=False, indent=1))
-    print(f"완료: past {len(past_entries)}, nowcast {len(nowcast_entries)}")
+    print(f"완료: past {len(past_entries)}, nowcast {len(nowcast_entries)}, "
+          f"wind {len(wind_entries)}")
     return 0
 
 
