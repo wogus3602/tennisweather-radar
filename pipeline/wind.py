@@ -8,7 +8,7 @@ import subprocess
 import numpy as np
 from osgeo import gdal, osr
 
-from . import grid, kma_api
+from . import kma_api
 
 gdal.UseExceptions()
 

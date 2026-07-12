@@ -156,7 +156,8 @@ def main() -> int:
         """재사용 다운로드한 wind 파일이 유효 데이터를 갖는지(전부-null 거부)."""
         try:
             doc = json.loads(p.read_text())
-            return any(x is not None for x in doc.get("u", []))
+            return (any(x is not None for x in doc.get("u", []))
+                    and any(x is not None for x in doc.get("v", [])))
         except Exception:
             return False
     (SITE / "wind").mkdir(exist_ok=True)
@@ -191,7 +192,7 @@ def main() -> int:
                 continue  # 미발표(미래) 발표시각 제외
             tmfc = tmfc_dt.strftime("%Y%m%d%H") + "30"
             cand = wind.fetch_uv(tmfc, vt, key)
-            if cand is not None and wind.coverage(cand[0]) > 0.01:
+            if cand is not None and wind.coverage(cand[0]) > 0.01 and wind.coverage(cand[1]) > 0.01:
                 got = cand
                 break
         if got is None:
