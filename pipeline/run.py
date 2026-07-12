@@ -7,7 +7,7 @@ import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import frames, grid, kma_api, render, wind
+from . import frames, grid, kma_api, precip, render, wind
 
 ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site"
@@ -48,6 +48,7 @@ def main() -> int:
     shutil.rmtree(WORK, ignore_errors=True)
     (SITE / "frames" / "past").mkdir(parents=True)
     (SITE / "frames" / "nowcast").mkdir(parents=True)
+    (SITE / "precip").mkdir(exist_ok=True)
     WORK.mkdir()
     (SITE / ".nojekyll").write_text("")
 
@@ -91,6 +92,7 @@ def main() -> int:
 
     # ── 예측(QPF +10~+120) ───────────────────────────────────────
     nowcast_entries = []
+    nowcast_grids = {}
     qpf_first = {}
 
     def qpf_probe(tm):
@@ -148,6 +150,15 @@ def main() -> int:
                 print(f"skip nowcast ef={ef}: {e}")
                 continue
             nowcast_entries.append((valid_tm, rel, bounds))
+            # 강수 타이밍용 강도 격자(코트 지점 샘플링). 실패는 격자만 생략.
+            try:
+                grid_doc = precip.build_precip_json(SITE / rel, bounds)
+                grid_rel = f"precip/{valid_tm}.json"
+                (SITE / grid_rel).write_text(
+                    json.dumps(grid_doc, separators=(",", ":")))
+                nowcast_grids[valid_tm] = grid_rel
+            except Exception as e:
+                print(f"skip precip {valid_tm}: {e}")
     else:
         print("QPF 발표분 없음 — 예측 프레임 생략")
 
@@ -215,11 +226,12 @@ def main() -> int:
 
     generated = datetime.now(kma_api.KST).isoformat(timespec="seconds")
     doc = frames.build_frames_json(past_entries, nowcast_entries, generated,
-                                   wind_entries=wind_entries)
+                                   wind_entries=wind_entries,
+                                   nowcast_grids=nowcast_grids)
     (SITE / "frames.json").write_text(
         json.dumps(doc, ensure_ascii=False, indent=1))
     print(f"완료: past {len(past_entries)}, nowcast {len(nowcast_entries)}, "
-          f"wind {len(wind_entries)}")
+          f"wind {len(wind_entries)}, precip {len(nowcast_grids)}")
     return 0
 
 
