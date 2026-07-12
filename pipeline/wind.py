@@ -49,6 +49,39 @@ def fetch_uv(tmfc: str, tmef: str, key: str):
     return out[0], out[1]
 
 
+def _fill_missing(arr: np.ndarray, iterations: int = 3) -> np.ndarray:
+    """결측(NaN)을 유효 4-이웃 평균으로 반복 확장 채움.
+
+    warp(bilinear)가 nodata 인접 셀을 침식시켜 해안 코트가 격자 구멍에
+    빠지는 문제를 막는다 — 3회 반복 ≈ 15km 연안 확장(표시용으로 무해).
+    내륙 깊은 결측(도메인 밖)은 그대로 NaN 유지.
+    """
+    out = arr.copy()
+    for _ in range(iterations):
+        nan = np.isnan(out)
+        if not nan.any():
+            break
+        acc = np.zeros_like(out)
+        cnt = np.zeros_like(out)
+        for shift in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            sh = np.roll(out, shift, axis=(0, 1))
+            # roll 경계 래핑 오염 방지: 래핑된 가장자리 행/열은 무효 처리
+            if shift[0] == 1:
+                sh[0, :] = np.nan
+            elif shift[0] == -1:
+                sh[-1, :] = np.nan
+            if shift[1] == 1:
+                sh[:, 0] = np.nan
+            elif shift[1] == -1:
+                sh[:, -1] = np.nan
+            valid = ~np.isnan(sh)
+            acc[valid] += sh[valid]
+            cnt[valid] += 1
+        fill = nan & (cnt > 0)
+        out[fill] = acc[fill] / cnt[fill]
+    return out
+
+
 def _write_dfs_tiff(arr: np.ndarray, path) -> None:
     drv = gdal.GetDriverByName("GTiff")
     ds = drv.Create(str(path), DFS_NX, DFS_NY, 1, gdal.GDT_Float32)
@@ -67,6 +100,7 @@ def build_wind_json(u: np.ndarray, v: np.ndarray, workdir,
     """U·V top-down 배열 → EPSG:4326 재투영·다운샘플 → 계약 스키마 dict."""
     doc = {}
     for name, arr in (("u", u), ("v", v)):
+        arr = _fill_missing(arr)
         lcc = workdir / f"wind_{name}_lcc.tif"
         ll = workdir / f"wind_{name}_4326.tif"
         _write_dfs_tiff(arr, lcc)

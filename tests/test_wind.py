@@ -44,6 +44,15 @@ class WindTest(unittest.TestCase):
         self.assertTrue(all(abs(x - 3.0) < 0.3 for x in valid_u))
         self.assertIn(None, doc["u"])  # 결측 전파
 
+    def test_fill_missing_extends_coast_but_keeps_deep_holes(self):
+        arr = np.full((20, 20), 2.0, dtype=np.float32)
+        arr[:10, :10] = np.nan  # 10x10 결측 블록
+        out = wind._fill_missing(arr, iterations=2)
+        self.assertFalse(np.isnan(out[9, 9]))   # 경계 2셀 채워짐
+        self.assertAlmostEqual(float(out[9, 9]), 2.0, places=3)
+        self.assertTrue(np.isnan(out[0, 0]))    # 깊은 내부는 유지
+        self.assertAlmostEqual(float(out[19, 19]), 2.0, places=3)  # 유효값 불변
+
 
 if __name__ == "__main__":
     unittest.main()
