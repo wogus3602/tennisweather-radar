@@ -1,4 +1,5 @@
 import contextlib
+import gzip
 import os
 import io
 import json
@@ -91,6 +92,12 @@ class ProxyRoutingTest(unittest.TestCase):
         test = self
 
         class FakeResp:
+            def __init__(self, body=b"BYTES", headers=None):
+                self._body = body
+                # 헤더 미지정 시 dict.get("Content-Encoding")가 None을
+                # 돌려줘 비압축(투명 통과) 경로를 흉내낸다.
+                self.headers = headers or {}
+
             def __enter__(self):
                 return self
 
@@ -98,11 +105,14 @@ class ProxyRoutingTest(unittest.TestCase):
                 return False
 
             def read(self):
-                return b"BYTES"
+                return self._body
+
+        self.FakeResp = FakeResp
+        self._next_resp = FakeResp()
 
         def fake_urlopen(url_or_req, timeout=60):
             test._calls.append(url_or_req)
-            return FakeResp()
+            return test._next_resp
 
         kma_api.urllib.request.urlopen = fake_urlopen
         self.addCleanup(
@@ -134,3 +144,26 @@ class ProxyRoutingTest(unittest.TestCase):
         kma_api._get("https://wogus3602.github.io/frames.json")
         self.assertEqual(self._calls[0],
                          "https://wogus3602.github.io/frames.json")
+
+    def test_proxy_sends_accept_encoding_gzip(self):
+        os.environ["KMA_PROXY_BASE"] = "https://proxy.example/kmaRadarProxy"
+        os.environ["KMA_PROXY_SECRET"] = "s3cret"
+        kma_api._get("https://apihub.kma.go.kr/x?a=1")
+        req = self._calls[0]
+        self.assertEqual(req.get_header("Accept-encoding"), "gzip")
+
+    def test_gzip_response_is_transparently_decompressed(self):
+        os.environ["KMA_PROXY_BASE"] = "https://proxy.example/kmaRadarProxy"
+        os.environ["KMA_PROXY_SECRET"] = "s3cret"
+        self._next_resp = self.FakeResp(
+            body=gzip.compress(b"PLAIN"),
+            headers={"Content-Encoding": "gzip"})
+        out = kma_api._get("https://apihub.kma.go.kr/x?a=1")
+        self.assertEqual(out, b"PLAIN")
+
+    def test_non_gzip_response_passes_through_unchanged(self):
+        os.environ["KMA_PROXY_BASE"] = "https://proxy.example/kmaRadarProxy"
+        os.environ["KMA_PROXY_SECRET"] = "s3cret"
+        self._next_resp = self.FakeResp(body=b"RAWBYTES")
+        out = kma_api._get("https://apihub.kma.go.kr/x?a=1")
+        self.assertEqual(out, b"RAWBYTES")

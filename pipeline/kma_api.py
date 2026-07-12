@@ -37,9 +37,13 @@ def _get(url: str, timeout: int = 60) -> bytes:
         req = urllib.request.Request(
             f"{proxy_base}?url=" + urllib.parse.quote(url, safe=""),
             headers={"x-radar-proxy-key":
-                     os.environ.get("KMA_PROXY_SECRET", "")})
+                     os.environ.get("KMA_PROXY_SECRET", ""),
+                     "Accept-Encoding": "gzip"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read()
+            body = r.read()
+            if r.headers.get("Content-Encoding") == "gzip":
+                body = gzip.decompress(body)
+            return body
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return r.read()
 
