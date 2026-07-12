@@ -23,6 +23,8 @@ jobs:
       - name: build site
         env:
           KMA_APIHUB_KEY: ${{ secrets.KMA_APIHUB_KEY }}
+          KMA_PROXY_BASE: ${{ secrets.KMA_PROXY_BASE }}
+          KMA_PROXY_SECRET: ${{ secrets.KMA_PROXY_SECRET }}
         run: python3 -m pipeline.run
       - name: deploy gh-pages (orphan force-push)
         run: |

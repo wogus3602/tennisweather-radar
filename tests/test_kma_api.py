@@ -1,4 +1,5 @@
 import contextlib
+import os
 import io
 import json
 import unittest
@@ -81,3 +82,55 @@ class FetchQpfOnceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProxyRoutingTest(unittest.TestCase):
+    def setUp(self):
+        self._calls = []
+        self._orig = kma_api.urllib.request.urlopen
+        test = self
+
+        class FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return b"BYTES"
+
+        def fake_urlopen(url_or_req, timeout=60):
+            test._calls.append(url_or_req)
+            return FakeResp()
+
+        kma_api.urllib.request.urlopen = fake_urlopen
+        self.addCleanup(
+            lambda: setattr(kma_api.urllib.request, "urlopen", self._orig))
+        for k in ("KMA_PROXY_BASE", "KMA_PROXY_SECRET"):
+            os.environ.pop(k, None)
+        self.addCleanup(
+            lambda: [os.environ.pop(k, None)
+                     for k in ("KMA_PROXY_BASE", "KMA_PROXY_SECRET")])
+
+    def test_direct_without_proxy_env(self):
+        out = kma_api._get("https://apihub.kma.go.kr/x?a=1")
+        self.assertEqual(out, b"BYTES")
+        self.assertEqual(self._calls[0], "https://apihub.kma.go.kr/x?a=1")
+
+    def test_routes_via_proxy_with_secret_header(self):
+        os.environ["KMA_PROXY_BASE"] = "https://proxy.example/kmaRadarProxy"
+        os.environ["KMA_PROXY_SECRET"] = "s3cret"
+        kma_api._get("https://apihub.kma.go.kr/x?a=1&b=2")
+        req = self._calls[0]
+        self.assertEqual(
+            req.full_url,
+            "https://proxy.example/kmaRadarProxy?url="
+            "https%3A%2F%2Fapihub.kma.go.kr%2Fx%3Fa%3D1%26b%3D2")
+        self.assertEqual(req.get_header("X-radar-proxy-key"), "s3cret")
+
+    def test_non_apihub_url_stays_direct(self):
+        os.environ["KMA_PROXY_BASE"] = "https://proxy.example/p"
+        kma_api._get("https://wogus3602.github.io/frames.json")
+        self.assertEqual(self._calls[0],
+                         "https://wogus3602.github.io/frames.json")

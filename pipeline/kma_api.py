@@ -1,6 +1,7 @@
 """기상청 API허브 클라이언트 — 실황(HSP) 바이너리·초단기 예측(4.4) 이미지."""
 import gzip
 import json
+import os
 import sys
 import urllib.parse
 import urllib.request
@@ -26,6 +27,19 @@ _QPF_FIXED = dict(
 
 
 def _get(url: str, timeout: int = 60) -> bytes:
+    """apihub GET. KMA_PROXY_BASE가 설정되면 프록시 경유.
+
+    GitHub Actions 러너(해외 IP)는 apihub에 TCP 연결이 차단되므로, 서울
+    리전 Firebase 함수(kmaRadarProxy)를 시크릿 헤더 인증으로 경유한다.
+    로컬(국내망)에서는 env 미설정으로 직접 호출."""
+    proxy_base = os.environ.get("KMA_PROXY_BASE")
+    if proxy_base and url.startswith(HOST):
+        req = urllib.request.Request(
+            f"{proxy_base}?url=" + urllib.parse.quote(url, safe=""),
+            headers={"x-radar-proxy-key":
+                     os.environ.get("KMA_PROXY_SECRET", "")})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
     with urllib.request.urlopen(url, timeout=timeout) as r:
         return r.read()
 
