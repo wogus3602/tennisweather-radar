@@ -152,6 +152,13 @@ def main() -> int:
         print("QPF 발표분 없음 — 예측 프레임 생략")
 
     # ── 바람(U·V, 시간당 1회 + Pages 재사용) ─────────────────────
+    def _wind_file_ok(p) -> bool:
+        """재사용 다운로드한 wind 파일이 유효 데이터를 갖는지(전부-null 거부)."""
+        try:
+            doc = json.loads(p.read_text())
+            return any(x is not None for x in doc.get("u", []))
+        except Exception:
+            return False
     (SITE / "wind").mkdir(exist_ok=True)
     wind_entries = []
     now = datetime.now(kma_api.KST)
@@ -171,7 +178,7 @@ def main() -> int:
         # 과거·현재 시각은 재사용 우선(예보 갱신 의미 없음), 미래는
         # refresh 런에서 재수집, 아닌 런은 재사용.
         if rel in old_wind and (not refresh or not is_future) \
-                and _download(f"{site_base}/{rel}", dest):
+                and _download(f"{site_base}/{rel}", dest) and _wind_file_ok(dest):
             wind_entries.append((vt, rel))
             continue
         if not refresh and rel not in old_wind:
