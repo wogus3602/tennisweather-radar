@@ -38,6 +38,22 @@ class FramesTest(unittest.TestCase):
         self.assertEqual(frames.reusable_paths(None, ["x"]), set())
         self.assertEqual(frames.reusable_paths({"bogus": 1}, ["x"]), set())
 
+    def test_nowcast_grid_attached_optional(self):
+        B = {"west": 1.0, "south": 2.0, "east": 3.0, "north": 4.0}
+        nc = [("202607121510", "frames/nowcast/202607121510.png", B),
+              ("202607121520", "frames/nowcast/202607121520.png", B)]
+        out = frames.build_frames_json(
+            [], nc, "g",
+            nowcast_grids={"202607121510": "precip/202607121510.json"})
+        by_path = {f["path"]: f for f in out["frames"]}
+        self.assertEqual(by_path["frames/nowcast/202607121510.png"]["grid"],
+                         "precip/202607121510.json")
+        self.assertNotIn("grid",
+                         by_path["frames/nowcast/202607121520.png"])
+        # 기본값(None)이면 grid 키 없음
+        out2 = frames.build_frames_json([], nc, "g")
+        self.assertTrue(all("grid" not in f for f in out2["frames"]))
+
     def test_wind_refresh_needed(self):
         target = "2026-07-12T21:00:00+09:00"
         self.assertTrue(frames.wind_refresh_needed(None, target))

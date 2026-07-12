@@ -6,16 +6,23 @@ def tm_to_iso(tm: str) -> str:
             f"T{tm[8:10]}:{tm[10:12]}:00+09:00")
 
 
-def build_frames_json(past, nowcast, generated_iso, wind_entries=()):
+def build_frames_json(past, nowcast, generated_iso, wind_entries=(),
+                       nowcast_grids=None):
     """past/nowcast: (tm, path, bounds) 목록 → 스키마 dict(time 오름차순).
 
     wind_entries: (tm, path) 목록 → doc["wind"] = [{"time","path"}](오름차순).
+    nowcast_grids: {tm: grid_path}|None → 해당 tm의 nowcast 항목에
+        entry["grid"] = grid_path 부착(없으면 키 자체 없음, 하위 호환).
     """
+    grids = nowcast_grids or {}
     out = []
     for kind, items in (("past", past), ("nowcast", nowcast)):
         for tm, path, bounds in items:
-            out.append({"time": tm_to_iso(tm), "path": path,
-                        "kind": kind, "bounds": bounds})
+            entry = {"time": tm_to_iso(tm), "path": path,
+                     "kind": kind, "bounds": bounds}
+            if kind == "nowcast" and tm in grids:
+                entry["grid"] = grids[tm]
+            out.append(entry)
     out.sort(key=lambda f: f["time"])
     wind = sorted(
         [{"time": tm_to_iso(tm), "path": p} for tm, p in wind_entries],
