@@ -1,0 +1,20 @@
+name: diag
+on:
+  workflow_dispatch:
+jobs:
+  connectivity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: probe endpoints
+        env:
+          KMA_APIHUB_KEY: ${{ secrets.KMA_APIHUB_KEY }}
+        run: |
+          for u in \
+            "https://apihub.kma.go.kr/" \
+            "https://apihub.kma.go.kr/api/typ01/url/rdr_cmp_file_list.php?cmp=HSR&tm=20260712&ext=bin&authKey=${KMA_APIHUB_KEY}" \
+            "https://www.weather.go.kr/w/index.do" \
+            "https://www.data.go.kr/" ; do
+            echo "=== ${u%%\?*}"
+            curl -sS -m 15 -o /dev/null -w "code=%{http_code} connect=%{time_connect}s total=%{time_total}s\n" "$u" || echo "FAILED (timeout/refused)"
+          done
