@@ -174,7 +174,24 @@ def qpf_to_overlay_png(png_bytes, cov, out_png, workdir, out_width=2048):
     return grid.bounds_4326(merc), levels
 
 
+def qpf_echo_count(png_bytes, workdir) -> int:
+    """예측 원시 응답에 실제 강수 에코가 몇 화소인가(배경 제외).
+
+    **원시 응답에 opaque_count 를 쓰면 안 된다.** 예측 이미지는 배경(회색 250)
+    까지 알파 255인 불투명 이미지라, 에코가 한 톨도 없어도 전 화소가 '불투명'
+    으로 세어진다 — 빈 응답을 절대 못 걸러낸다. 실제로 이것 때문에 기상청이
+    간헐적으로 돌려주는 '에코 없는' 응답이 그대로 채택돼, 배경을 투명화한
+    완전 투명 PNG가 정상 프레임으로 발행됐다(앱에서 비구름이 한 프레임
+    사라졌다 되돌아옴). 내용 판정은 알파가 아니라 '배경색이 아닌 화소'로 한다.
+    """
+    return int((_qpf_rgba(png_bytes, workdir)[3] > 0).sum())
+
+
 def opaque_count(png_path) -> int:
+    """**렌더 결과** PNG의 불투명 화소 수(배경이 이미 투명화된 뒤라야 의미 있다).
+
+    원시 예측 응답에는 쓰지 말 것 — qpf_echo_count 참조.
+    """
     ds = gdal.Open(str(png_path))
     a = ds.ReadAsArray()
     if a is None or a.ndim != 3 or a.shape[0] < 4:

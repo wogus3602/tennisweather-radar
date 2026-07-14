@@ -113,5 +113,50 @@ class FramesTest(unittest.TestCase):
         self.assertTrue(frames.wind_refresh_needed({"wind": []}, target))
 
 
+class PublishableNowcastTest(unittest.TestCase):
+    """빈 예측 프레임이 '데이터 구멍'인지 '맑은 날'인지 가르는 판정.
+
+    0을 무조건 버리면 맑은 날 나우캐스트가 통째로 사라지고, 0을 무조건 실으면
+    비 오는 날 비구름이 한 프레임 사라졌다 되돌아온다. 그래서 절대값이 아니라
+    '지금 비가 오는가'로 판정한다.
+    """
+
+    def test_blank_between_echoes_is_a_data_hole(self):
+        # 운영에서 실제로 터진 모양: 23:30 에코 → 23:40 완전 투명 → 23:50 에코.
+        self.assertEqual(
+            frames.publishable_nowcast([5, 0, 7], observed_echo=9),
+            [True, False, True])
+
+    def test_clear_sky_keeps_every_frame(self):
+        # 관측도 예측도 0 = 진짜로 비가 안 온다. 이걸 버리면 맑은 날 예측이 사라진다.
+        self.assertEqual(
+            frames.publishable_nowcast([0, 0, 0], observed_echo=0),
+            [True, True, True])
+
+    def test_all_blank_while_it_is_raining_is_dropped(self):
+        # QPF 전면 장애: 지금 비가 오는데 예측이 전부 비었다 → 예측 전체가 거짓.
+        self.assertEqual(
+            frames.publishable_nowcast([0, 0, 0], observed_echo=9),
+            [False, False, False])
+
+    def test_leading_and_trailing_blanks_dropped_when_raining(self):
+        self.assertEqual(
+            frames.publishable_nowcast([0, 3, 0], observed_echo=0),
+            [False, True, False])
+
+    def test_unknown_observation_falls_back_to_forecast_only(self):
+        # 관측 측정 실패(None) — 예측 안에 에코가 있으면 빈 프레임은 구멍이고,
+        # 예측이 전부 비었으면 맑은 날로 본다(관측이 없으니 반증할 근거가 없다).
+        self.assertEqual(
+            frames.publishable_nowcast([0, 3], observed_echo=None),
+            [False, True])
+        self.assertEqual(
+            frames.publishable_nowcast([0, 0], observed_echo=None),
+            [True, True])
+
+    def test_empty_input(self):
+        self.assertEqual(frames.publishable_nowcast([], observed_echo=9), [])
+
+
 if __name__ == "__main__":
     unittest.main()
