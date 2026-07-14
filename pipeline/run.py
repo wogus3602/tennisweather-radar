@@ -145,14 +145,17 @@ def main() -> int:
             valid_tm = (base_dt + timedelta(minutes=ef)).strftime("%Y%m%d%H%M")
             rel = f"frames/nowcast/{valid_tm}.png"
             try:
-                bounds = render.qpf_to_overlay_png(png, cov, SITE / rel, WORK)
+                bounds, levels = render.qpf_to_overlay_png(
+                    png, cov, SITE / rel, WORK)
             except Exception as e:
                 print(f"skip nowcast ef={ef}: {e}")
                 continue
             nowcast_entries.append((valid_tm, rel, bounds))
             # 강수 타이밍용 강도 격자(코트 지점 샘플링). 실패는 격자만 생략.
+            # 배포된 표시용 PNG를 되읽지 않는다 — 스무딩된 색은 강도로 분류할 수
+            # 없다. 렌더가 워프 전 순수 팔레트에서 뽑아둔 레벨을 그대로 쓴다.
             try:
-                grid_doc = precip.build_precip_json(SITE / rel, bounds)
+                grid_doc = precip.build_precip_json(levels, bounds)
                 grid_rel = f"precip/{valid_tm}.json"
                 (SITE / grid_rel).write_text(
                     json.dumps(grid_doc, separators=(",", ":")))
