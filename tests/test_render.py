@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from osgeo import gdal
 
-from pipeline import grid, render
+from pipeline import grid, precip, render
 
 gdal.UseExceptions()
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,6 +21,18 @@ QPF_PALETTE = [(0, 74, 245), (0, 255, 0), (255, 255, 0)]  # make_qpf_png 강도 
 def synthetic_hsp():
     arr = np.full((grid.NY, grid.NX), grid.NORAIN_V, dtype=np.int16)
     arr[1400:1500, 1100:1200] = 500  # 5mm/h 블록
+    return arr
+
+
+def synthetic_hsp_two_levels():
+    """레벨 2(초록, 5mm/h)와 레벨 4(빨강, 20mm/h) 블록이 맞닿은 실황 배열.
+
+    경계가 있어야 '보간이 일어나는가'를 측정할 수 있다 — bilinear 워프였다면
+    2와 4 사이에 3(그리고 무강수 경계에 1)이 발명된다.
+    """
+    arr = np.full((grid.NY, grid.NX), grid.NORAIN_V, dtype=np.int16)
+    arr[1400:1500, 1000:1100] = 500    # 5.0 mm/h → level 2
+    arr[1400:1500, 1100:1200] = 2000   # 20.0 mm/h → level 4
     return arr
 
 
@@ -90,6 +102,47 @@ class RenderTest(unittest.TestCase):
             rgba = np.moveaxis(a, 0, -1)
             unique = np.unique(rgba.reshape(-1, 4), axis=0)
             self.assertGreater(len(unique), 20)
+
+    def test_hsp_levels_share_the_published_png_pixel_grid(self):
+        """실황 레벨격자는 배포 PNG와 같은 화소격자여야 한다.
+
+        build_precip_json 의 max-pool 구간이 화면에 보이는 것과 같은 영역을
+        집계해야 '지금 여기 비 오나'가 그림과 일치한다.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            arr = synthetic_hsp()
+            png = Path(td) / "o.png"
+            png_bounds = render.render_hsp_png(arr, png, Path(td), COLORMAP)
+            ds = gdal.Open(str(png))
+            bounds, levels = render.hsp_levels(arr, Path(td))
+
+        self.assertEqual(levels.shape, (ds.RasterYSize, ds.RasterXSize))
+        self.assertEqual(levels.shape[1], 2048)
+        for k in ("west", "south", "east", "north"):
+            self.assertAlmostEqual(bounds[k], png_bounds[k], places=6)
+
+        doc = precip.build_precip_json(levels, bounds)
+        self.assertEqual(len(doc["level"]), doc["nx"] * doc["ny"])
+        self.assertTrue(all(0 <= v <= 4 for v in doc["level"]))
+        self.assertIn(2, doc["level"])   # 5mm/h 블록이 실제로 실렸는가
+
+    def test_hsp_levels_are_categorical_not_interpolated(self):
+        """레벨은 범주값 — 워프·확대가 중간값을 발명하면 안 된다.
+
+        레벨 2와 4가 맞닿아 있으므로 보간이 일어나면 그 사이에 3이 생긴다.
+        near 경로가 유지되는 한 배열엔 정확히 {0, 2, 4}만 존재한다.
+
+        실제로 무는 건 마지막 gdal_translate 단계다(워프는 2305→2553 업샘플이라
+        커널이 사실상 near로 붕괴한다 — 확인함). 즉 '표시용처럼 부드럽게 만들자'며
+        -r near 를 bilinear 로 바꾸는 순간 level 3이 발명되고 이 테스트가 잡는다.
+        QPF에서 이미 한 번 저지른 실수의 거울상이라 값싸게 못 박아 둔다.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            _, levels = render.hsp_levels(synthetic_hsp_two_levels(),
+                                          Path(td))
+        uniq = set(int(v) for v in np.unique(levels))
+        self.assertEqual(uniq, {0, 2, 4},
+                         f"중간 레벨이 발명됐다(보간 의심): {sorted(uniq)}")
 
     def test_qpf_background_removed(self):
         with tempfile.TemporaryDirectory() as td:

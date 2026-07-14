@@ -13,7 +13,12 @@ ROOT = Path(__file__).resolve().parent.parent
 SITE = ROOT / "site"
 WORK = ROOT / "work"
 COLORMAP = ROOT / "colormap_hsp.txt"
-PAST_COUNT = 24          # 5분 × 2시간
+# 5분 × 6 = 30분. 예전엔 24(2시간)였는데, 실측으로 과거 PNG가 장당 평균 732KB라
+# 런당 17.2MB를 굽고 타임라인이 과거 67% / 미래 33%로 기울었다 — 사용자가 레이더를
+# 여는 이유는 '올 비'인데 슬라이더의 2/3가 지난 비였다. 6장이면 비구름의 방향과
+# 속도(예보를 믿게 만드는 바로 그 근거)는 그대로 보이고 '지금'(최신 관측)도 남으면서
+# ≈12.9MB를 덜 굽고 미래가 67%가 된다.
+PAST_COUNT = 6
 NOWCAST_EFS = range(10, 121, 10)  # +10~+120분
 QPF_RETRIES = 3
 
@@ -89,6 +94,33 @@ def main() -> int:
             print(f"skip past {tm}: {e}")
             continue
         past_entries.append((tm, rel, bounds))
+
+    # ── 실황 강도격자(최신 관측 1장) ─────────────────────────────
+    # precip 격자가 예측(base+10분~)에만 있어서, 앱은 "지금 비 오나?"를 20분 넘게
+    # 낡을 수 있는 예보로 추정해야 했다(이미 그친 비에 "N분 뒤 비 그침"이 뜬 실사용
+    # 버그). 관측(HSP)만이 현재의 ground truth이고 이미 받아서 렌더까지 해뒀다.
+    #
+    # PNG를 재사용(reuse)해 렌더를 건너뛴 프레임이라도 격자는 반드시 만든다 —
+    # 원시 바이트는 downloaded 에 남아 있고(최신 tm은 probe가 받아둔다), 없으면
+    # 다시 받는다. "PNG를 재사용했으니 격자도 생략"은 곧 '지금'이 사라진다는 뜻.
+    #
+    # 실패는 비치명적: 격자 없이(past grid 키 없이) 배포한다 — 순수 추가 기능이지
+    # 새 중단 조건이 아니다.
+    past_grids = {}
+    if past_entries:
+        tm = max(e[0] for e in past_entries)   # 최신 관측(= "지금")
+        try:
+            raw = downloaded.get(tm) or kma_api.fetch_hsp(tm, key)
+            if raw is None:
+                raise RuntimeError("원시 HSP 재수집 실패")
+            bounds, levels = render.hsp_levels(grid.parse_grid(raw), WORK)
+            grid_rel = f"precip/obs_{tm}.json"   # 예측 격자와 파일명 충돌 방지
+            (SITE / grid_rel).write_text(
+                json.dumps(precip.build_precip_json(levels, bounds),
+                           separators=(",", ":")))
+            past_grids[tm] = grid_rel
+        except Exception as e:
+            print(f"skip obs precip {tm}: {e}")
 
     # ── 예측(QPF +10~+120) ───────────────────────────────────────
     nowcast_entries = []
@@ -230,11 +262,13 @@ def main() -> int:
     generated = datetime.now(kma_api.KST).isoformat(timespec="seconds")
     doc = frames.build_frames_json(past_entries, nowcast_entries, generated,
                                    wind_entries=wind_entries,
-                                   nowcast_grids=nowcast_grids)
+                                   nowcast_grids=nowcast_grids,
+                                   past_grids=past_grids)
     (SITE / "frames.json").write_text(
         json.dumps(doc, ensure_ascii=False, indent=1))
     print(f"완료: past {len(past_entries)}, nowcast {len(nowcast_entries)}, "
-          f"wind {len(wind_entries)}, precip {len(nowcast_grids)}")
+          f"wind {len(wind_entries)}, precip {len(nowcast_grids)}, "
+          f"obs precip {len(past_grids)}")
     return 0
 
 

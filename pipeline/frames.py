@@ -7,20 +7,28 @@ def tm_to_iso(tm: str) -> str:
 
 
 def build_frames_json(past, nowcast, generated_iso, wind_entries=(),
-                       nowcast_grids=None):
+                       nowcast_grids=None, past_grids=None):
     """past/nowcast: (tm, path, bounds) 목록 → 스키마 dict(time 오름차순).
 
     wind_entries: (tm, path) 목록 → doc["wind"] = [{"time","path"}](오름차순).
     nowcast_grids: {tm: grid_path}|None → 해당 tm의 nowcast 항목에
         entry["grid"] = grid_path 부착(없으면 키 자체 없음, 하위 호환).
+    past_grids: {tm: grid_path}|None → 같은 방식으로 past 항목에 부착. 실황
+        관측 격자용이며 run.py는 '최신 관측 1장'만 넣는다(순수 추가 — 구버전
+        앱은 kind=="nowcast"만 걷으므로 이 키를 그냥 지나친다).
+
+    past_grids와 nowcast_grids를 하나로 합치지 않는 이유: tm이 겹칠 수 있다
+    (HSP 21:30 관측과 QPF base 21:20 +10분 예측이 같은 21:30). 그래서 격자
+    파일명도 obs_ 접두로 분리한다.
     """
-    grids = nowcast_grids or {}
+    kind_grids = {"past": past_grids or {}, "nowcast": nowcast_grids or {}}
     out = []
     for kind, items in (("past", past), ("nowcast", nowcast)):
+        grids = kind_grids[kind]
         for tm, path, bounds in items:
             entry = {"time": tm_to_iso(tm), "path": path,
                      "kind": kind, "bounds": bounds}
-            if kind == "nowcast" and tm in grids:
+            if tm in grids:
                 entry["grid"] = grids[tm]
             out.append(entry)
     out.sort(key=lambda f: f["time"])

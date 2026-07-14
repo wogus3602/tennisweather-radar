@@ -9,7 +9,7 @@ from . import grid, precip
 gdal.UseExceptions()
 
 _QPF_BG = 250       # 예측 이미지의 불투명 배경 회색값(R=G=B=250)
-_QPF_NODATA = 0     # 레벨 0(무강수) = nodata
+_LVL_NODATA = 0     # 레벨 격자(예측·실황 공통): 레벨 0(무강수) = nodata
 
 
 def render_hsp_png(arr, out_png, workdir, colormap_path, out_width=2048):
@@ -32,6 +32,34 @@ def render_hsp_png(arr, out_png, workdir, colormap_path, out_width=2048):
                     "-outsize", str(out_width), "0", str(color), str(out_png)],
                    check=True)
     return grid.bounds_4326(merc)
+
+
+def hsp_levels(arr, workdir, out_width=2048):
+    """top-down HSP 배열 → 배포 PNG와 같은 화소격자의 정수 강도레벨.
+    (bounds, levels(H,W) int16) 반환.
+
+    왜 있나: precip 격자가 예측(base+10분~)에만 있어서 앱은 "지금 비 오나?"를
+    20분 넘게 낡을 수 있는 예보로 추정해야 했다(이미 그친 비에 "N분 뒤 그침"이
+    뜬 실사용 버그). 실황(HSP)만이 현재의 ground truth이고 파이프라인이 이미
+    받아 렌더까지 하고 있었다 — 레벨 격자만 안 내보내고 있었을 뿐.
+
+    표시용(render_hsp_png: bilinear + 컬러램프)과 같은 2048×H 격자에 맞추되,
+    워프·확대는 near 로만 한다 — 레벨은 범주값이라 보간하면 2와 4 사이에 3이
+    발명된다. 같은 화소격자여야 build_precip_json 의 max-pool 구간이 사용자가
+    화면에서 보는 영역과 일치한다(_qpf_levels 와 같은 이유·같은 방법).
+    """
+    lvl = precip.hsp_levels_grid(arr)
+    lcc = workdir / "hsp_lvl_lcc.tif"
+    # 도메인 밖 채움값 = 0(무강수). NULL_V로 채우면 레벨 격자에 -30000이 샌다.
+    grid.write_lcc_tiff(lvl, lcc, nodata=_LVL_NODATA)
+    near = workdir / "hsp_lvl_near.tif"
+    grid.warp_to_3857(lcc, near, nodata=_LVL_NODATA)          # near(기본)
+    pooled = workdir / "hsp_lvl_grid.tif"
+    subprocess.run(["gdal_translate", "-q", "-r", "near",
+                    "-outsize", str(out_width), "0", str(near), str(pooled)],
+                   check=True)
+    levels = gdal.Open(str(pooled)).ReadAsArray().astype(np.int16)
+    return grid.bounds_4326(pooled), levels
 
 
 def _qpf_rgba(png_bytes, workdir):
@@ -118,9 +146,9 @@ def _qpf_levels(rgba, cov, workdir, out_width):
     """
     lvl = precip.levels_grid(rgba).astype(np.int16)[None]
     lcc = workdir / "qpf_lvl_lcc.tif"
-    _write_lcc(lvl, cov, lcc, gdal.GDT_Int16, nodata=_QPF_NODATA)
+    _write_lcc(lvl, cov, lcc, gdal.GDT_Int16, nodata=_LVL_NODATA)
     near = workdir / "qpf_lvl_near.tif"
-    grid.warp_to_3857(lcc, near, nodata=_QPF_NODATA)
+    grid.warp_to_3857(lcc, near, nodata=_LVL_NODATA)
     pooled = workdir / "qpf_lvl_grid.tif"
     subprocess.run(["gdal_translate", "-q", "-r", "near",
                     "-outsize", str(out_width), "0", str(near), str(pooled)],

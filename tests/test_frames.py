@@ -54,6 +54,54 @@ class FramesTest(unittest.TestCase):
         out2 = frames.build_frames_json([], nc, "g")
         self.assertTrue(all("grid" not in f for f in out2["frames"]))
 
+    def test_past_grid_attached_to_latest_only(self):
+        """관측 격자는 '최신 과거 프레임 1장'에만 붙는 순수 추가(additive).
+
+        와이어 계약: 출시된 앱·Cloud Function이 frames.json을 파싱한다. 기존
+        필드는 한 톨도 바뀌면 안 되고, 나머지 과거 프레임엔 grid가 없어야 한다
+        (구버전은 kind=="nowcast"만 걷으므로 이 키를 무시하고 지나간다).
+        """
+        past = [("202607142125", "frames/past/202607142125.png", B),
+                ("202607142130", "frames/past/202607142130.png", B)]
+        nc = [("202607142140", "frames/nowcast/202607142140.png", B)]
+        out = frames.build_frames_json(
+            past, nc, "g",
+            nowcast_grids={"202607142140": "precip/202607142140.json"},
+            past_grids={"202607142130": "precip/obs_202607142130.json"})
+        by_path = {f["path"]: f for f in out["frames"]}
+
+        latest = by_path["frames/past/202607142130.png"]
+        self.assertEqual(latest["grid"], "precip/obs_202607142130.json")
+        self.assertEqual(latest["kind"], "past")
+        self.assertEqual(latest["bounds"], B)
+        self.assertEqual(latest["time"], "2026-07-14T21:30:00+09:00")
+        self.assertNotIn("grid", by_path["frames/past/202607142125.png"])
+        # nowcast 항목은 그대로(키 집합까지 동일)
+        nowcast = by_path["frames/nowcast/202607142140.png"]
+        self.assertEqual(set(nowcast), {"time", "path", "kind", "bounds",
+                                        "grid"})
+        self.assertEqual(nowcast["grid"], "precip/202607142140.json")
+        # 기본값이면 과거 프레임에 grid 키 자체가 없음(하위 호환)
+        out2 = frames.build_frames_json(past, nc, "g")
+        self.assertTrue(all("grid" not in f for f in out2["frames"]))
+
+    def test_past_and_nowcast_grids_do_not_cross_contaminate(self):
+        """past tm과 nowcast valid_tm은 겹칠 수 있다(HSP 21:30 = QPF base 21:20+10).
+
+        그래서 격자 맵을 하나로 합치면 안 되고, 파일명도 obs_ 접두로 분리한다.
+        """
+        tm = "202607142130"
+        out = frames.build_frames_json(
+            [(tm, f"frames/past/{tm}.png", B)],
+            [(tm, f"frames/nowcast/{tm}.png", B)], "g",
+            nowcast_grids={tm: f"precip/{tm}.json"},
+            past_grids={tm: f"precip/obs_{tm}.json"})
+        by_path = {f["path"]: f for f in out["frames"]}
+        self.assertEqual(by_path[f"frames/past/{tm}.png"]["grid"],
+                         f"precip/obs_{tm}.json")
+        self.assertEqual(by_path[f"frames/nowcast/{tm}.png"]["grid"],
+                         f"precip/{tm}.json")
+
     def test_wind_refresh_needed(self):
         target = "2026-07-12T21:00:00+09:00"
         self.assertTrue(frames.wind_refresh_needed(None, target))

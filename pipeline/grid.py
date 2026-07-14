@@ -31,7 +31,13 @@ def parse_grid(raw: bytes) -> np.ndarray:
     return np.flipud(arr)  # 파일은 남→북 행순서
 
 
-def write_lcc_tiff(arr: np.ndarray, path) -> None:
+def write_lcc_tiff(arr: np.ndarray, path, nodata=NULL_V) -> None:
+    """(NY,NX) int16 → 관측 CRS(LCC lat_0=38) 지오레퍼런스 GTiff.
+
+    nodata 는 워프가 도메인 밖(3857 사각형의 모서리)을 채울 값이기도 하다.
+    원값 래스터는 NULL_V 가 맞지만, 레벨 래스터는 0(무강수)으로 채워야 한다 —
+    -30000 이 남으면 max-pool 이 그걸 레벨로 읽어 스키마(0~4)가 깨진다.
+    """
     drv = gdal.GetDriverByName("GTiff")
     ds = drv.Create(str(path), NX, NY, 1, gdal.GDT_Int16,
                     options=["COMPRESS=DEFLATE"])
@@ -41,7 +47,7 @@ def write_lcc_tiff(arr: np.ndarray, path) -> None:
     ds.SetProjection(srs.ExportToWkt())
     band = ds.GetRasterBand(1)
     band.WriteArray(arr)
-    band.SetNoDataValue(NULL_V)
+    band.SetNoDataValue(nodata)
     ds.FlushCache()
 
 

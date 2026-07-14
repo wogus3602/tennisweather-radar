@@ -68,6 +68,34 @@ class LevelTest(unittest.TestCase):
         self.assertEqual(precip.level_of(255, 50, 0, 255), 4)   # 빨강=매우강
 
 
+class HspLevelTest(unittest.TestCase):
+    """실황(HSP int16, 값=mm/h×100) → 레벨. 경계값을 못 박는다.
+
+    colormap_hsp.txt 의 색 구간과 같은 자리에서 끊겨야 사용자가 화면에서 보는
+    색과 앱이 받는 레벨이 어긋나지 않는다(파랑1/초록2/노랑·주황3/빨강·보라4).
+    """
+
+    def test_thresholds_at_boundaries(self):
+        cases = [(9, 0), (10, 1), (199, 1), (200, 2), (599, 2), (600, 3),
+                 (1199, 3), (1200, 4), (15000, 4)]
+        for v, want in cases:
+            self.assertEqual(precip.hsp_level_of(v), want, f"v={v}")
+
+    def test_null_and_norain_are_zero(self):
+        self.assertEqual(precip.hsp_level_of(grid.NULL_V), 0)
+        self.assertEqual(precip.hsp_level_of(grid.NORAIN_V), 0)
+        self.assertEqual(precip.hsp_level_of(0), 0)
+
+    def test_grid_is_vectorized_equivalent(self):
+        arr = np.array([[grid.NULL_V, grid.NORAIN_V, 9, 10],
+                        [199, 200, 599, 600],
+                        [1199, 1200, 5000, 0]], dtype=np.int16)
+        got = precip.hsp_levels_grid(arr)
+        self.assertEqual(got.dtype, np.int16)
+        self.assertEqual(got.tolist(), [[0, 0, 0, 1], [1, 2, 2, 3],
+                                        [3, 4, 4, 0]])
+
+
 class BuildTest(unittest.TestCase):
     BOUNDS = {"west": 121.0, "south": 32.0, "east": 132.0, "north": 43.0}
 
