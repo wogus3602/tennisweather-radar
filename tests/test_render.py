@@ -36,16 +36,19 @@ def synthetic_hsp_two_levels():
     return arr
 
 
-def make_qpf_png(td):
+def make_qpf_png(td, echo=True):
     """예측 응답 모사: 250,250,250 배경 + 강도 3단(파랑·초록·노랑) 인접 블록.
 
     강도가 맞닿은 경계가 있어야 '보간이 실제로 일어나는가'를 측정할 수 있다
     (단색 한 덩어리는 near로 확대해도 색 수가 안 늘어 near/bilinear 구분 불가).
+
+    [echo]=False면 배경만 있는 '빈 응답' — 기상청이 간헐적으로 돌려주는 그것.
+    알파는 배경까지 255다(운영 응답과 동일). 이 사실이 BlankResponseTest의 요점.
     """
     n = QPF_NX
     a = np.full((4, n, n), 255, dtype=np.uint8)
     a[0], a[1], a[2] = 250, 250, 250
-    for i, rgb in enumerate(QPF_PALETTE):
+    for i, rgb in enumerate(QPF_PALETTE if echo else []):
         x0 = 170 + i * 48
         for c in range(3):
             a[c, 180:260, x0:x0 + 48] = rgb[c]
@@ -209,6 +212,37 @@ class RenderTest(unittest.TestCase):
             self.assertLess(int(d.min()), 24,
                             f"원본 팔레트색 {want} 이 결과에 남아있지 않다 "
                             f"(최근접 색 거리 {int(d.min())})")
+
+
+class BlankResponseTest(unittest.TestCase):
+    """빈 예측 응답('에코 0')을 알아보는 층.
+
+    운영에서 완전 투명한 나우캐스트 프레임이 발행돼, 앱에서 비구름이 한 프레임
+    사라졌다 되돌아왔다(이류 예측에선 물리적으로 불가능한 그림).
+    """
+
+    def test_echo_count_is_zero_for_background_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            png = make_qpf_png(td, echo=False)
+            self.assertEqual(render.qpf_echo_count(png, Path(td)), 0)
+
+    def test_echo_count_is_positive_when_echo_present(self):
+        with tempfile.TemporaryDirectory() as td:
+            png = make_qpf_png(td)
+            self.assertGreater(render.qpf_echo_count(png, Path(td)), 0)
+
+    def test_opaque_count_is_blind_to_a_blank_raw_response(self):
+        """왜 qpf_echo_count 가 따로 필요한가 — 회귀 방지용 못.
+
+        원시 예측 응답은 **배경까지 알파 255**인 불투명 이미지다. 그래서
+        opaque_count(원시)는 에코가 한 픽셀도 없어도 전 화소를 세어 0이 아니다.
+        이걸 '내용 있음'으로 읽은 게 빈 프레임이 그대로 발행된 원인이었다.
+        내용 판정은 알파가 아니라 '배경색이 아닌 화소'로 해야 한다.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            raw = Path(td) / "raw.png"
+            raw.write_bytes(make_qpf_png(td, echo=False))
+            self.assertGreater(render.opaque_count(raw), 0)
 
 
 if __name__ == "__main__":

@@ -38,6 +38,30 @@ def build_frames_json(past, nowcast, generated_iso, wind_entries=(),
     return {"generated": generated_iso, "frames": out, "wind": wind}
 
 
+def publishable_nowcast(echoes, observed_echo=None):
+    """예측 프레임별 발행 여부 — 빈 응답(데이터 구멍)을 걸러낸다.
+
+    기상청 예측(4.4)은 간헐적으로 '에코가 하나도 없는' 이미지를 돌려준다. 그대로
+    발행하면 앱 타임라인 한가운데서 비구름이 한 프레임 사라졌다가 되돌아온다 —
+    이류 예측에서 물리적으로 불가능한 그림이고, 실제로 사용자가 본 버그다.
+
+    그렇다고 '에코 0 = 버린다'로 짜면 안 된다. 전국에 비가 없는 날은 **모든**
+    프레임이 정상적으로 0이고, 그때 나우캐스트가 통째로 사라진다. 0은 결측이
+    아니라 정상값일 수 있다. 그래서 절대값이 아니라 '지금 비가 오는가'로 가른다:
+
+      · 관측에도 예측에도 에코가 없다 → 맑은 날. 전부 발행한다.
+      · 어딘가에 에코가 있다 → 비어 있는 프레임은 데이터 구멍이다. 버린다.
+        (비가 오는데 예측이 전부 비었으면 예측 전체가 거짓 → 한 장도 싣지 않는다.)
+
+    echoes: ef 오름차순 에코 화소 수. observed_echo: 최신 관측 프레임의 에코
+    화소 수(측정 실패면 None → 예측만으로 판정).
+    """
+    raining = any(e > 0 for e in echoes) or bool(observed_echo)
+    if not raining:
+        return [True] * len(echoes)
+    return [e > 0 for e in echoes]
+
+
 def wind_refresh_needed(old_frames_json, target_latest_iso):
     """이전 배포의 최신 바람 시각이 목표 최신 시각보다 과거면 재수집.
 

@@ -122,6 +122,19 @@ def main() -> int:
         except Exception as e:
             print(f"skip obs precip {tm}: {e}")
 
+    # 최신 관측의 에코량 — 예측의 '빈 프레임'이 데이터 구멍인지 맑은 날인지
+    # 가르는 유일한 기준이다(frames.publishable_nowcast). 렌더 결과 PNG는 무강수가
+    # 이미 투명이라 opaque_count 가 그대로 에코량이다(원시 예측 응답과 다르다 —
+    # 그쪽은 배경까지 불투명이라 render.qpf_echo_count 를 써야 한다).
+    # 측정 실패는 비치명적: None 이면 예측만으로 판정한다.
+    observed_echo = None
+    if past_entries:
+        try:
+            latest_rel = max(past_entries, key=lambda e: e[0])[1]
+            observed_echo = render.opaque_count(SITE / latest_rel)
+        except Exception as e:
+            print(f"관측 에코 측정 실패(예측만으로 판정): {e}")
+
     # ── 예측(QPF +10~+120) ───────────────────────────────────────
     nowcast_entries = []
     nowcast_grids = {}
@@ -133,47 +146,54 @@ def main() -> int:
             qpf_first[tm] = got
         return got is not None
 
+    def collect_qpf(base, ef, tries, preload=None):
+        """ef 하나의 최선 응답 → (echo, cov, png) 또는 None(응답 자체가 없음).
+
+        에코가 0인 응답은 간헐 장애일 수 있어 [tries]회까지 다시 받아보고 가장
+        내용이 많은 것을 채택한다. 끝까지 비어 있으면 echo=0 인 채로 돌려준다 —
+        그게 '맑음'인지 '데이터 구멍'인지는 전체 맥락을 아는 호출부가 판정한다.
+        """
+        best = None
+        for i in range(tries):
+            got = (preload if i == 0 and preload is not None
+                   else kma_api.fetch_qpf_once(base, ef, key))
+            if got is None:
+                continue
+            cov, png = got
+            try:
+                echo = render.qpf_echo_count(png, WORK)
+            except Exception as e:
+                print(f"skip nowcast ef={ef} attempt: 응답 검사 실패 {e}")
+                continue
+            if best is None or echo > best[0]:
+                best = (echo, cov, png)
+            if echo > 0:
+                break   # 내용이 있으면 즉시 채택
+        return best
+
     base_tms = kma_api.latest_tms(qpf_probe, step_min=10, count=1, max_back=6)
     if base_tms:
         base = base_tms[0]
         base_dt = datetime.strptime(base + "+0900", "%Y%m%d%H%M%z")
+        # 비가 안 오는 날엔 빈 응답이 정상이다 — 재시도로 트래픽을 3배 쓰지 않는다.
+        tries = 1 if observed_echo == 0 else QPF_RETRIES
+
+        candidates = []   # (ef, echo, cov, png)
         for ef in NOWCAST_EFS:
-            best = None  # (opaque, cov, png)
-            remaining = QPF_RETRIES
-            preload = qpf_first.get(base) if ef == 10 else None
-            if preload is not None:
-                remaining -= 1
-                cov, png = preload
-                tmp = WORK / "probe.png"
-                tmp.write_bytes(png)
-                try:
-                    op = render.opaque_count(tmp)
-                except Exception as e:
-                    print(f"skip nowcast ef={ef} attempt: 응답 검사 실패 {e}")
-                else:
-                    best = (op, cov, png)
-            for _ in range(remaining):
-                if best is not None and best[0] > 0:
-                    break
-                got = kma_api.fetch_qpf_once(base, ef, key)
-                if got is None:
-                    continue
-                cov, png = got
-                tmp = WORK / "probe.png"
-                tmp.write_bytes(png)
-                try:
-                    op = render.opaque_count(tmp)
-                except Exception as e:
-                    print(f"skip nowcast ef={ef} attempt: 응답 검사 실패 {e}")
-                    continue
-                if best is None or op > best[0]:
-                    best = (op, cov, png)
-                if op > 0:
-                    break  # 간헐 빈 응답 우회 — 내용 있으면 즉시 채택
-            if best is None:
+            got = collect_qpf(base, ef, tries,
+                              preload=qpf_first.get(base) if ef == 10 else None)
+            if got is None:
                 print(f"skip nowcast ef={ef}: 응답 없음")
                 continue
-            _, cov, png = best
+            candidates.append((ef, *got))
+
+        keep = frames.publishable_nowcast([c[1] for c in candidates],
+                                          observed_echo=observed_echo)
+        for (ef, echo, cov, png), ok in zip(candidates, keep):
+            if not ok:
+                print(f"skip nowcast ef={ef}: 빈 응답(에코 0) — "
+                      f"관측 에코 {observed_echo} 이라 데이터 구멍으로 판단")
+                continue
             valid_tm = (base_dt + timedelta(minutes=ef)).strftime("%Y%m%d%H%M")
             rel = f"frames/nowcast/{valid_tm}.png"
             try:
