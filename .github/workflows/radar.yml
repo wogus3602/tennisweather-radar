@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  actions: write
 concurrency:
   group: radar
   cancel-in-progress: false
@@ -14,6 +15,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: record start
+        run: echo "RUN_START=$(date +%s)" >> "$GITHUB_ENV"
       - name: install gdal
         run: |
           sudo apt-get update -q
@@ -35,3 +38,20 @@ jobs:
           git add -A
           git commit -q -m "radar $(date -u +%FT%TZ)"
           git push -f -q "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
+      # GitHub의 schedule 이벤트는 베스트에포트라 */10이 실제로는 1~3시간 간격으로
+      # 발화한다(2026-07-15 실측: 평균 ~1h, 최악 3h23m). 성공한 런이 10분 주기를
+      # 채운 뒤 다음 런을 직접 dispatch해 주기를 보장하고, schedule은 체인이
+      # 끊겼을 때(런 실패·GitHub 장애)의 복구 폴백으로 남긴다. 사용자 승인:
+      # 2026-07-15 세션(무료 유지 조건). 중단하려면 이 스텝 삭제 또는 워크플로 비활성화.
+      # GITHUB_TOKEN의 workflow_dispatch는 재귀 방지 규칙의 문서화된 예외라 새 런을
+      # 정상 트리거하며, concurrency 그룹(radar)이 pending을 1개로 붕괴시켜
+      # 체인이 중복 증식하지 않는다(스케줄+체인이 겹쳐도 자동 수렴).
+      - name: self-requeue (10분 주기 보장)
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          elapsed=$(( $(date +%s) - RUN_START ))
+          wait=$(( 600 - elapsed ))
+          if [ "$wait" -gt 0 ]; then sleep "$wait"; fi
+          gh workflow run radar.yml -R "${{ github.repository }}"
