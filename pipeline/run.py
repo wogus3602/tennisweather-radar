@@ -175,13 +175,22 @@ def main() -> int:
     if base_tms:
         base = base_tms[0]
         base_dt = datetime.strptime(base + "+0900", "%Y%m%d%H%M%z")
-        # 비가 안 오는 날엔 빈 응답이 정상이다 — 재시도로 트래픽을 3배 쓰지 않는다.
-        tries = 1 if observed_echo == 0 else QPF_RETRIES
 
         candidates = []   # (ef, echo, cov, png)
-        for ef in NOWCAST_EFS:
+        efs = list(NOWCAST_EFS)
+        # 재시도 게이트는 '가장 가까운 예측'(ef=10)이다. 예전엔 관측 에코
+        # (observed_echo)로 쟀는데, 그건 한반도 어딘가에 1픽셀만 있어도 참이라
+        # 여름엔 사실상 항상 켜졌다 — 리드타임 전부가 3회씩 재시도해 런당 41~58회를
+        # 썼다(2026-07-27 실측. 이 호출은 kmaRadarProxy egress로 그대로 청구된다).
+        # ef=10이 비어 있으면 뒤 리드타임이 비는 것도 정상이고, ef=10이 살아 있는데
+        # 뒤만 비면 그때가 간헐 장애 의심 구간이다. 게이트 자신은 재시도를 받는다 —
+        # 한 번의 간헐 빈 응답이 런 전체의 재시도를 꺼버리면 게이트를 옮긴 의미가 없다.
+        tries = QPF_RETRIES
+        for ef in efs:
             got = collect_qpf(base, ef, tries,
                               preload=qpf_first.get(base) if ef == 10 else None)
+            if ef == efs[0]:
+                tries = 1 if got is None or got[0] == 0 else QPF_RETRIES
             if got is None:
                 print(f"skip nowcast ef={ef}: 응답 없음")
                 continue

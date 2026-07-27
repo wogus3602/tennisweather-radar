@@ -10,6 +10,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from unittest import mock
 
@@ -218,6 +219,70 @@ class NowcastHoleTest(unittest.TestCase):
 
         self.assertEqual(self._nowcast(doc), [])
         self.assertTrue([f for f in doc["frames"] if f["kind"] == "past"])
+
+
+class NowcastRetryBudgetTest(unittest.TestCase):
+    """빈 예측 재시도는 '가장 가까운 예측이 살아 있을 때'만 값어치가 있다.
+
+    재시도 게이트가 전국 관측 에코(observed_echo)였는데, 한반도 어딘가에 1픽셀만
+    있어도 참이라 여름 내내 사실상 항상 켜졌다 — 리드타임 12개가 전부 3회씩 재시도해
+    런당 41~58회를 썼다(2026-07-27 실측. 설계 의도는 ~15회, 프록시 egress가 그만큼
+    청구된다). 게이트를 ef=10(가장 가까운 예측)으로 옮긴다: 그게 비어 있으면 뒤가
+    비는 것도 정상이고, 살아 있는데 뒤만 비면 그때가 간헐 장애 의심 구간이다.
+    """
+
+    def setUp(self):
+        self.td = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.td, True)
+        self.raw = fake_hsp_raw()          # 관측에는 에코가 있다(옛 게이트=항상 켜짐)
+        self.blank_efs = set()
+        self.calls = Counter()
+
+        def fetch_qpf(tm, ef, key):
+            self.calls[ef] += 1
+            return QPF_COV, make_qpf_png(str(self.td),
+                                         echo=ef not in self.blank_efs)
+
+        for p in [
+            mock.patch.object(run, "SITE", self.td / "site"),
+            mock.patch.object(run, "WORK", self.td / "work"),
+            mock.patch.object(run, "PAST_COUNT", 2),
+            mock.patch.object(run, "NOWCAST_EFS", range(10, 41, 10)),
+            mock.patch.object(kma_api, "fetch_hsp", lambda tm, key: self.raw),
+            mock.patch.object(kma_api, "fetch_qpf_once", fetch_qpf),
+            mock.patch.object(wind, "fetch_uv", lambda *a, **k: None),
+            mock.patch.dict("os.environ", {"KMA_APIHUB_KEY": "test",
+                                           "SITE_BASE": SITE_BASE}),
+        ]:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_empty_nearest_forecast_stops_retrying_later_leads(self):
+        """ef=10이 비었으면 뒤 리드타임의 빈 응답도 정상 — 한 번씩만 받는다."""
+        self.blank_efs = {10, 20, 30, 40}
+        run_main_captured(self)
+
+        self.assertEqual([self.calls[ef] for ef in (20, 30, 40)], [1, 1, 1],
+                         "빈 예측이 확인됐는데도 리드타임마다 재시도했다")
+
+    def test_live_nearest_forecast_keeps_retrying_empty_leads(self):
+        """ef=10에 에코가 있는데 뒤만 비었다 = 간헐 장애 의심 → 재시도는 유지한다."""
+        self.blank_efs = {20}
+        run_main_captured(self)
+
+        self.assertEqual(self.calls[20], run.QPF_RETRIES,
+                         "살아있는 예측 옆의 빈 응답을 한 번 만에 믿어버렸다")
+
+    def test_nearest_forecast_itself_still_gets_retries(self):
+        """게이트가 될 ef=10은 자신이 재시도를 받아야 한다 — 한 번의 간헐 빈 응답이
+        런 전체의 재시도를 꺼버리면 게이트를 옮긴 의미가 없다."""
+        self.blank_efs = {10, 20, 30, 40}
+        run_main_captured(self)
+
+        # 발표분 탐색(qpf_probe)이 1회 선점하고 collect_qpf가 preload로 재사용하므로
+        # ef=10 총 호출은 재시도 횟수와 같다.
+        self.assertEqual(self.calls[10], run.QPF_RETRIES,
+                         "게이트 프레임이 재시도 없이 판정됐다")
 
 
 class ConstantTest(unittest.TestCase):
