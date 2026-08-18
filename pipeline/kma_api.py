@@ -29,8 +29,8 @@ _QPF_FIXED = dict(
 def _get(url: str, timeout: int = 60) -> bytes:
     """apihub GET. KMA_PROXY_BASE가 설정되면 프록시 경유.
 
-    GitHub Actions 러너(해외 IP)는 apihub에 TCP 연결이 차단되므로, 서울
-    리전 Firebase 함수(kmaRadarProxy)를 시크릿 헤더 인증으로 경유한다.
+    GitHub Actions 러너(해외 IP)는 apihub에 TCP 연결이 차단되므로,
+    Cloudflare Worker 등 프록시 함수를 시크릿 헤더 인증으로 경유한다.
     로컬(국내망)에서는 env 미설정으로 직접 호출."""
     proxy_base = os.environ.get("KMA_PROXY_BASE")
     if proxy_base and url.startswith(HOST):
@@ -68,12 +68,14 @@ def fetch_hsp(tm: str, key: str):
            f"?tm={tm}&data=bin&cmp=hsp&authKey={key}")
     try:
         body = _get(url)
-    except Exception:
+    except Exception as e:
+        print(f"[fetch_hsp error] tm={tm}: {type(e).__name__} {e}", file=sys.stderr)
         return None
     if body[:2] == b"\x1f\x8b":
         try:
             return gzip.decompress(body)
-        except Exception:
+        except Exception as e:
+            print(f"[fetch_hsp decompress error] tm={tm}: {e}", file=sys.stderr)
             return None
     return body if len(body) > 1_000_000 else None
 
