@@ -38,6 +38,7 @@ def _get(url: str, timeout: int = 60) -> bytes:
             f"{proxy_base}?url=" + urllib.parse.quote(url, safe=""),
             headers={"x-radar-proxy-key":
                      os.environ.get("KMA_PROXY_SECRET", ""),
+                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                      "Accept-Encoding": "gzip"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             body = r.read()
