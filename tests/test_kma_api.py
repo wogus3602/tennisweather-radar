@@ -81,6 +81,44 @@ class FetchQpfOnceTest(unittest.TestCase):
         self.assertIn("스키마", buf.getvalue())
 
 
+class FetchHspTest(unittest.TestCase):
+    def _patch_get(self, body):
+        orig = kma_api._get
+        kma_api._get = lambda url, timeout=60: body
+        self.addCleanup(lambda: setattr(kma_api, "_get", orig))
+
+    def _fetch(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            out = kma_api.fetch_hsp("202609301200", "SECRETKEY")
+        return out, buf.getvalue()
+
+    def test_gzip_body_is_decompressed_silently(self):
+        self._patch_get(gzip.compress(b"GRID"))
+        out, err = self._fetch()
+        self.assertEqual(out, b"GRID")
+        self.assertEqual(err, "")
+
+    def test_small_non_binary_body_returns_none_and_logs_head(self):
+        # 09-30~10-01 26시간 정지: 200인데 레이더가 아닌 작은 응답을 조용히 버려
+        # 원인(점검·한도·차단)을 알 수 없었다 — 응답 앞부분을 남긴다.
+        self._patch_get("일일 호출 한도 초과".encode("utf-8") + b"x" * 500)
+        out, err = self._fetch()
+        self.assertIsNone(out)
+        self.assertIn("tm=202609301200", err)
+        self.assertIn("일일 호출 한도 초과", err)
+        self.assertIn("len=", err)
+        self.assertLess(len(err), 400)  # 앞부분만
+        self.assertNotIn("SECRETKEY", err)
+
+    def test_large_non_gzip_body_passes_through(self):
+        body = b"\x00" * 1_000_001
+        self._patch_get(body)
+        out, err = self._fetch()
+        self.assertEqual(out, body)
+        self.assertEqual(err, "")
+
+
 if __name__ == "__main__":
     unittest.main()
 
