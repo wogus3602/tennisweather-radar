@@ -78,7 +78,14 @@ def fetch_hsp(tm: str, key: str):
         except Exception as e:
             print(f"[fetch_hsp decompress error] tm={tm}: {e}", file=sys.stderr)
             return None
-    return body if len(body) > 1_000_000 else None
+    if len(body) > 1_000_000:
+        return body
+    # 200인데 레이더가 아닌 작은 응답(미발표·점검·한도 초과 안내 등). 예전엔 조용히
+    # 버려서 09-30~10-01 26시간 정지 때 원인을 알 수 없었다 — 앞부분만 남긴다.
+    head = body[:200].decode("utf-8", "replace").replace("\n", " ")
+    print(f"[fetch_hsp non-binary] tm={tm} len={len(body)}: {head}",
+          file=sys.stderr)
+    return None
 
 
 def fetch_qpf_once(tm: str, ef: int, key: str):
